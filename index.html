@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Read the Beaker — Water Level Practice (Accurate Meniscus)</title>
+<style>
+  :root{
+    --ink:#0f172a; --muted:#475569; --line:#e2e8f0;
+    --accent:#7c3aed; --good:#16a34a; --bad:#dc2626;
+    --bg1:#fff7ed; --bg2:#eef6ff; --panel:#ffffff;
+    --aqua:#7dd3fc; --aqua-dark:#38bdf8; --glass:#e2e8f0;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; font:17px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Arial;
+    color:var(--ink);
+    background:linear-gradient(180deg,var(--bg1),var(--bg2) 60%);
+  }
+  header{max-width:980px;margin:22px auto 0;padding:0 16px}
+  h1{margin:0 0 6px;font-size:28px}
+  .note{color:var(--muted);margin-bottom:8px}
+  .meta{display:flex;gap:14px;align-items:center;font-weight:900;flex-wrap:wrap}
+
+  main{max-width:980px;margin:14px auto 28px;padding:0 16px}
+  .wrap{display:grid;grid-template-columns:1fr 370px;gap:16px;align-items:stretch}
+  @media (max-width:980px){ .wrap{grid-template-columns:1fr} }
+
+  .card{background:var(--panel);border:2px solid var(--line);border-radius:16px;padding:16px;box-shadow:0 8px 20px rgba(17,24,39,.08)}
+  .canvas{
+    display:flex;align-items:center;justify-content:center;min-height:420px;
+    background:radial-gradient(1200px 220px at 50% -60px, rgba(124,58,237,.06), transparent);
+    border-radius:12px;border:2px dashed #eaeaea
+  }
+  .aside .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .prompt{font-size:18px;font-weight:800;margin:8px 0 2px}
+
+  .answer{display:grid;grid-template-columns:1fr 110px;gap:10px;align-items:center}
+  .answer input{
+    padding:12px 12px;border:2px solid var(--line);border-radius:12px;font-weight:900;font-size:18px;text-align:center
+  }
+  .unit{font-weight:900}
+  .status{min-height:1.2em;font-weight:900;margin-top:6px}
+  .ok{color:var(--good)} .no{color:var(--bad)}
+  .controls{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+  button{
+    padding:10px 14px;border:none;border-radius:12px;background:var(--accent);
+    color:#fff;font-weight:900;cursor:pointer
+  }
+  button.secondary{background:#fff;color:#0f172a;border:2px solid var(--line)}
+  button.ghost{background:transparent;color:var(--ink);border:2px dashed var(--line)}
+  button:disabled{opacity:.6;cursor:not-allowed}
+
+  .summary{display:none;margin-top:12px;padding:12px;border:2px solid var(--line);border-radius:12px;background:#fffef5}
+
+  .chip{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;background:#fff;border:2px solid var(--line);border-radius:999px}
+  .pill{display:inline-block;padding:2px 8px;border-radius:999px;background:#eef2ff;color:#3730a3;font-weight:900}
+
+  /* SVG beaker styles */
+  .tick{stroke:#334155;stroke-width:2; shape-rendering:crispEdges}
+  .tick.major{stroke:#0f172a;stroke-width:3}
+  .label{font:600 12px/1 system-ui,Segoe UI,Roboto,Arial; fill:#0f172a}
+  .hintTick{stroke:#ef4444;stroke-width:4;stroke-linecap:round;filter:drop-shadow(0 1px 1px rgba(0,0,0,.25))}
+  .meniscus{stroke:#0891b2; stroke-width:2; fill:none}
+</style>
+</head>
+<body>
+<header>
+  <h1>Read the Beaker — Water Level Practice</h1>
+  <div class="note">Intervals: <b>5, 10, 20, 25, 50, 100 mL</b>. Water surface (meniscus) is drawn <b>exactly on the tick mark</b>. Type your reading in <b>mL</b>.</div>
+  <div class="meta">
+    <div class="chip">Progress: <span id="progress" class="pill">1 / 10</span></div>
+    <div class="chip">Score: <span id="score" class="pill">0</span></div>
+    <div class="chip">Current Interval: <span id="interval" class="pill">—</span></div>
+    <div class="chip">Capacity: <span id="capacity" class="pill">— mL</span></div>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <div class="card canvas">
+      <div id="beakerHost" aria-live="polite"></div>
+    </div>
+
+    <aside class="card aside">
+      <div class="prompt">What is the water level?</div>
+      <div class="answer">
+        <input id="answer" type="number" inputmode="numeric" placeholder="enter mL value" aria-label="Your reading in millilitres">
+        <div class="unit">mL</div>
+      </div>
+      <div id="status" class="status">&nbsp;</div>
+
+      <div class="controls">
+        <button id="check">Check</button>
+        <button id="hint" class="secondary">Show hint</button>
+        <button id="skip" class="ghost">Skip</button>
+      </div>
+
+      <div class="summary" id="summary"></div>
+
+      <hr style="margin:14px 0;border:none;border-top:2px dashed var(--line)">
+
+      
+    </aside>
+  </div>
+</main>
+
+<footer style="max-width:980px;margin:0 auto 18px;padding:0 16px;text-align:center;color:#475569;font-weight:700;">
+  © 2025 Lim Kim Sze — Practice Tool
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------- helpers ----------
+  const rnd=(a,b)=>Math.floor(Math.random()*(b-a+1))+a;
+  const qs=(s, r=document)=>r.querySelector(s);
+
+  function makeQuestion(){
+    const intervals=[5,10,20,25,50,100]; // <-- added 25 mL here
+    const interval=intervals[rnd(0, intervals.length-1)];
+    const ticks=rnd(8,18);
+    const capacity = interval * ticks;
+    const k = rnd(1, ticks-1);               // avoid 0 and top
+    const value = k * interval;
+    return {interval, ticks, capacity, k, value};
+  }
+
+  function buildSet(n=10){
+    const set=[]; const seen=new Set();
+    while(set.length<n){
+      const q=makeQuestion();
+      const key=`${q.interval}|${q.capacity}|${q.value}`;
+      if(!seen.has(key)){ seen.add(key); set.push(q); }
+    }
+    return set;
+  }
+
+  // ---------- beaker drawing with accurate meniscus ----------
+  function drawBeaker(host, q, showHint=false){
+    const W=270, H=420;
+    const pad=28;
+    const glassW=W-2*pad;
+    const glassH=H-2*pad;
+    const innerX=pad, innerY=pad;
+    const bottomMargin=12, topMargin=12;
+    const rightPad=6;
+
+    const svgNS='http://www.w3.org/2000/svg';
+    const svg=document.createElementNS(svgNS,'svg');
+    svg.setAttribute('width', W);
+    svg.setAttribute('height', H);
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.setAttribute('role','img');
+    svg.setAttribute('aria-label', `Beaker with capacity ${q.capacity} millilitres and interval of ${q.interval} millilitres`);
+
+    // defs
+    const defs=document.createElementNS(svgNS,'defs');
+
+    const grad=document.createElementNS(svgNS,'linearGradient');
+    grad.setAttribute('id','waterGrad');
+    grad.setAttribute('x1','0');grad.setAttribute('x2','0');grad.setAttribute('y1','0');grad.setAttribute('y2','1');
+    const s1=document.createElementNS(svgNS,'stop'); s1.setAttribute('offset','0%'); s1.setAttribute('stop-color','#a5f3fc');
+    const s2=document.createElementNS(svgNS,'stop'); s2.setAttribute('offset','100%'); s2.setAttribute('stop-color','#38bdf8');
+    grad.appendChild(s1); grad.appendChild(s2);
+
+    const glassGrad=document.createElementNS(svgNS,'linearGradient');
+    glassGrad.setAttribute('id','glassGrad'); glassGrad.setAttribute('x1','0'); glassGrad.setAttribute('x2','1');
+    glassGrad.setAttribute('y1','0'); glassGrad.setAttribute('y2','0');
+    const g1=document.createElementNS(svgNS,'stop'); g1.setAttribute('offset','0%'); g1.setAttribute('stop-color','#ffffff'); g1.setAttribute('stop-opacity','.75');
+    const g2=document.createElementNS(svgNS,'stop'); g2.setAttribute('offset','100%'); g2.setAttribute('stop-color','#ffffff'); g2.setAttribute('stop-opacity','0');
+    glassGrad.appendChild(g1); glassGrad.appendChild(g2);
+
+    const blur=document.createElementNS(svgNS,'filter');
+    blur.setAttribute('id','bubbleBlur');
+    const feG=document.createElementNS(svgNS,'feGaussianBlur'); feG.setAttribute('in','SourceGraphic'); feG.setAttribute('stdDeviation','0.6');
+    blur.appendChild(feG);
+
+    defs.appendChild(grad); defs.appendChild(glassGrad); defs.appendChild(blur);
+    svg.appendChild(defs);
+
+    // Beaker outline
+    const radius=16;
+    const glass=document.createElementNS(svgNS,'rect');
+    glass.setAttribute('x', innerX); glass.setAttribute('y', innerY);
+    glass.setAttribute('width', glassW); glass.setAttribute('height', glassH);
+    glass.setAttribute('rx', radius); glass.setAttribute('ry', radius);
+    glass.setAttribute('fill','#ffffff');
+    glass.setAttribute('stroke','#cbd5e1'); glass.setAttribute('stroke-width','4');
+    svg.appendChild(glass);
+
+    // Compute tick geometry
+    const ticks = q.ticks;
+    const stepPx = (glassH - (topMargin + bottomMargin)) / ticks;
+    const baseY = innerY + glassH - bottomMargin;
+    const xRight = innerX + glassW - rightPad;
+
+    // Accurate surface Y aligned to tick
+    const ySurface = Math.round((baseY - q.k*stepPx) * 2) / 2; // half-pixel for sharpness
+    const waterTopY = ySurface;
+    const waterBottomY = innerY + glassH - 3;
+    const waterH = Math.max(6, waterBottomY - waterTopY);
+
+    // Water body
+    const water=document.createElementNS(svgNS,'rect');
+    water.setAttribute('x', innerX+3); water.setAttribute('y', waterTopY);
+    water.setAttribute('width', glassW-6); water.setAttribute('height', waterH);
+    water.setAttribute('fill','url(#waterGrad)');
+    water.setAttribute('opacity','0.95');
+    svg.appendChild(water);
+
+    // Meniscus curve
+    const menLeft = innerX+8, menRight = innerX+glassW-8, menMidX = innerX+glassW/2;
+    const arc = document.createElementNS(svgNS,'path');
+    const curveDepth = 3;
+    arc.setAttribute('d', `M ${menLeft} ${ySurface} Q ${menMidX} ${ySurface+curveDepth} ${menRight} ${ySurface}`);
+    arc.setAttribute('class','meniscus');
+    arc.setAttribute('opacity','.8');
+    svg.appendChild(arc);
+
+    // Bubbles
+    for(let i=0;i<10;i++){
+      const cx = innerX + 10 + Math.random()*(glassW-20);
+      const cy = waterTopY + 6 + Math.random()*Math.max(8, waterH-12);
+      const r  = 2 + Math.random()*3;
+      const b  = document.createElementNS(svgNS,'circle');
+      b.setAttribute('cx',cx); b.setAttribute('cy',cy); b.setAttribute('r',r);
+      b.setAttribute('fill','#ffffff'); b.setAttribute('opacity','.45');
+      b.setAttribute('filter','url(#bubbleBlur)');
+      svg.appendChild(b);
+    }
+
+    // Ticks & labels
+    const tickLenMajor=16, tickLenMinor=10;
+    const labelEvery = Math.max(1, Math.ceil(ticks/6));
+    for(let i=0;i<=ticks;i++){
+      const y = Math.round((baseY - i*stepPx) * 2) / 2;
+      const isMajor = (i % labelEvery === 0) || (i===0) || (i===ticks);
+      const len = isMajor ? tickLenMajor : tickLenMinor;
+
+      const line=document.createElementNS(svgNS,'line');
+      line.setAttribute('x1', xRight - len); line.setAttribute('x2', xRight);
+      line.setAttribute('y1', y); line.setAttribute('y2', y);
+      line.setAttribute('class', isMajor ? 'tick major' : 'tick');
+      svg.appendChild(line);
+
+      if(isMajor){
+        const label=document.createElementNS(svgNS,'text');
+        label.setAttribute('x', xRight + 4);
+        label.setAttribute('y', y + 4);
+        label.setAttribute('class','label');
+        label.textContent = `${i*q.interval}`;
+        svg.appendChild(label);
+      }
+
+      if(showHint && i===q.k){
+        const hint=document.createElementNS(svgNS,'line');
+        hint.setAttribute('x1', innerX+8); hint.setAttribute('x2', xRight+22);
+        hint.setAttribute('y1', y); hint.setAttribute('y2', y);
+        hint.setAttribute('class','hintTick');
+        svg.appendChild(hint);
+      }
+    }
+
+    // Capacity label
+    const cap=document.createElementNS(svgNS,'text');
+    cap.setAttribute('x', innerX + glassW/2);
+    cap.setAttribute('y', innerY - 8);
+    cap.setAttribute('text-anchor','middle');
+    cap.setAttribute('class','label');
+    cap.setAttribute('font-weight','900');
+    cap.textContent = `0 → ${q.capacity} mL  (interval ${q.interval} mL)`;
+    svg.appendChild(cap);
+
+    // Glass shine
+    const shine=document.createElementNS(svgNS,'rect');
+    shine.setAttribute('x', innerX+6); shine.setAttribute('y', innerY+6);
+    shine.setAttribute('width', 10); shine.setAttribute('height', glassH-12);
+    shine.setAttribute('fill','url(#glassGrad)');
+    shine.setAttribute('opacity','.4');
+    svg.appendChild(shine);
+
+    host.innerHTML='';
+    host.appendChild(svg);
+  }
+
+  // ---------- app logic ----------
+  const progressEl=qs('#progress');
+  const scoreEl=qs('#score');
+  const intervalEl=qs('#interval');
+  const capacityEl=qs('#capacity');
+  const host=qs('#beakerHost');
+  const ans=qs('#answer');
+  const status=qs('#status');
+  const summary=qs('#summary');
+
+  let questions = buildSet(10);
+  let idx = 0;
+  let score = 0;
+  let hintShown = false;
+
+  function showQuestion(){
+    const q = questions[idx];
+    progressEl.textContent = `${idx+1} / ${questions.length}`;
+    intervalEl.textContent = `${q.interval} mL`;
+    capacityEl.textContent = `${q.capacity} mL`;
+    hintShown=false;
+    drawBeaker(host, q, false);
+    ans.value='';
+    status.textContent=' ';
+    status.className='status';
+    ans.focus();
+  }
+
+  function check(){
+    const q = questions[idx];
+    const valStr = String(ans.value).trim().toLowerCase().replace('ml','').trim();
+    const v = Number(valStr);
+    if(!Number.isFinite(v)){
+      status.textContent='Enter a number in mL.'; status.className='status no'; return;
+    }
+    if(!Number.isInteger(v)){
+      status.textContent='Please enter a whole number (mL).'; status.className='status no'; return;
+    }
+    if(v<0 || v>q.capacity){
+      status.textContent=`Answer must be between 0 and ${q.capacity} mL.`; status.className='status no'; return;
+    }
+
+    if(v===q.value){
+      status.textContent='Correct!'; status.className='status ok';
+      score++; scoreEl.textContent=String(score);
+      setTimeout(next, 600);
+    }else{
+      status.textContent='Try again'; status.className='status no';
+    }
+  }
+
+  function next(){
+    idx++;
+    if(idx<questions.length){
+      showQuestion();
+    }else{
+      qs('#check').disabled=true; qs('#hint').disabled=true; qs('#skip').disabled=true; ans.disabled=true;
+      summary.style.display='block';
+      summary.innerHTML = `<b>Well done!</b> You scored <b>${score}/${questions.length}</b>.`;
+      drawBeaker(host, questions[questions.length-1], true);
+    }
+  }
+
+  // events
+  qs('#check').addEventListener('click', check);
+  ans.addEventListener('keydown', e=>{ if(e.key==='Enter') check(); });
+  qs('#hint').addEventListener('click', ()=>{
+    hintShown = !hintShown;
+    drawBeaker(host, questions[idx], hintShown);
+    qs('#hint').textContent = hintShown ? 'Hide hint' : 'Show hint';
+  });
+  qs('#skip').addEventListener('click', next);
+
+  // init
+  showQuestion();
+})();
+</script>
+</body>
+</html>
